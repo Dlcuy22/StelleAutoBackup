@@ -1,0 +1,4 @@
+github.com/t3rm1n4l/go-mega v0.0.0-20251031123324-a804aaa87491 h1:rrGZv6xYk37hx0tW2sYfgbO0PqStbHqz6Bq6oc9Hurg=
+github.com/t3rm1n4l/go-mega v0.0.0-20251031123324-a804aaa87491/go.mod h1:ykucQyiE9Q2qx1wLlEtZkkNn1IURib/2O+Mvd25i1Fo=
+golang.org/x/crypto v0.42.0 h1:chiH31gIWm57EkTXpwnqf8qeuMUi0yekh6mT2AvFlqI=
+golang.org/x/crypto v0.42.0/go.mod h1:4+rDnOTJhQCx2q7/j6rAN5XDw8kPjeaXEUR2eL94ix8=

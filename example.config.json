@@ -1,0 +1,35 @@
+{
+  "mega_email": "UrMega",
+  "mega_password": "UrPassword",
+  "log_file": "backup.log",
+  "backup_jobs": [
+    {
+      "name": "documents_backup",
+      "source_paths": [
+        "./examplefile"
+      ],
+      "interval_minutes": 60,
+      "mega_folder": "Backups/Documents",
+      "enabled": true
+    },
+    {
+      "name": "photos_backup",
+      "source_paths": [
+        "/home/user/Photos"
+      ],
+      "interval_minutes": 1440,
+      "mega_folder": "Backups/Photos",
+      "enabled": true
+    },
+    {
+      "name": "config_backup",
+      "source_paths": [
+        "/etc/nginx",
+        "/home/user/.config"
+      ],
+      "interval_minutes": 720,
+      "mega_folder": "Backups/Configs",
+      "enabled": false
+    }
+  ]
+}
