@@ -10,37 +10,40 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/t3rm1n4l/go-mega"
 )
 
 // BackupSystem manages the backup operations
 type BackupSystem struct {
 	config *config.Configuration
-	mega   *mega.Mega
+	mega   *MegaService // <-- gunakan MegaService CLI wrapper
 	logger *log.Logger
 }
 
 // NewBackupSystem creates a new backup system instance
 func NewBackupSystem(configPath string) (*BackupSystem, error) {
 	// Read configuration file
-	config, err := config.LoadConfig(configPath)
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %v", err)
 	}
 
 	// Setup logger
-	logFile, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	logFile, err := os.OpenFile(cfg.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open log file: %v", err)
 	}
 
 	logger := log.New(io.MultiWriter(os.Stdout, logFile), "[BACKUP] ", log.LstdFlags)
 
-	return &BackupSystem{
-		config: config,
+	bs := &BackupSystem{
+		config: cfg,
 		logger: logger,
-	}, nil
+	}
+
+	// prepare MegaService instance (delay login to connectMega)
+	bs.mega = NewMegaService(cfg.MegaEmail, cfg.MegaPassword, 20*time.Second)
+
+	return bs, nil
 }
 
 // Start begins the backup system
@@ -70,8 +73,8 @@ func (bs *BackupSystem) Start() error {
 
 // connectMega establishes connection to MEGA
 func (bs *BackupSystem) connectMega() error {
-	bs.mega = mega.New()
-	return bs.mega.Login(bs.config.MegaEmail, bs.config.MegaPassword)
+	// bs.mega sudah di-inisialisasi di NewBackupSystem
+	return bs.mega.EnsureLoggedIn(bs.config.MegaEmail)
 }
 
 // runBackupJob executes a backup job periodically
@@ -92,6 +95,12 @@ func (bs *BackupSystem) runBackupJob(job *config.BackupJob) {
 func (bs *BackupSystem) performBackup(job *config.BackupJob) {
 	bs.logger.Printf("Starting backup job: %s\n", job.Name)
 	startTime := time.Now()
+
+	// ensure we are logged in with correct account before compress/upload
+	if err := bs.mega.EnsureLoggedIn(bs.config.MegaEmail); err != nil {
+		bs.logger.Printf("[%s] ERROR: MEGA session invalid and reconnection failed: %v\n", job.Name, err)
+		return
+	}
 
 	// Create archive filename with timestamp
 	timestamp := time.Now().Format("2006-01-02_15-04-05")
@@ -128,6 +137,31 @@ func (bs *BackupSystem) performBackup(job *config.BackupJob) {
 	bs.logger.Printf("[%s] Backup completed successfully in %v\n", job.Name, duration)
 }
 
+// uploadToMega uploads a file to MEGA cloud storage using MegaService
+func (bs *BackupSystem) uploadToMega(localPath, fileName, megaFolder string) error {
+	// Ensure folder exists (create if needed)
+	if megaFolder != "" && megaFolder != "/" {
+		if err := bs.mega.EnsurePathRecursive(megaFolder); err != nil {
+			return fmt.Errorf("failed to ensure remote folder %s: %v", megaFolder, err)
+		}
+	}
+
+	// Construct remote path. Many mega CLI expect folder path or full path:
+	remotePath := ""
+	if megaFolder == "" || megaFolder == "/" {
+		// upload to root - many megacmd treat plain file target as upload to root
+		remotePath = "/" + fileName
+	} else {
+		remotePath = filepath.ToSlash(filepath.Join(megaFolder, fileName))
+	}
+
+	_, err := bs.mega.Upload(localPath, remotePath)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // compressFiles creates a tar.gz archive from the specified paths
 func (bs *BackupSystem) compressFiles(sourcePaths []string, destPath string) error {
 	// Create output file
@@ -155,7 +189,6 @@ func (bs *BackupSystem) compressFiles(sourcePaths []string, destPath string) err
 	return nil
 }
 
-// addToArchive recursively adds files/folders to the tar archive
 func (bs *BackupSystem) addToArchive(tarWriter *tar.Writer, sourcePath, baseInArchive string) error {
 	info, err := os.Stat(sourcePath)
 	if err != nil {
@@ -216,34 +249,4 @@ func (bs *BackupSystem) addFileToArchive(tarWriter *tar.Writer, filePath, pathIn
 
 	_, err = io.Copy(tarWriter, file)
 	return err
-}
-
-// uploadToMega uploads a file to MEGA cloud storage
-func (bs *BackupSystem) uploadToMega(localPath, fileName, megaFolder string) error {
-	// Get or create the destination folder
-	parentNode, err := bs.getOrCreateMegaFolder(megaFolder)
-	if err != nil {
-		return err
-	}
-
-	// Upload the file
-	_, err = bs.mega.UploadFile(localPath, parentNode, fileName, nil)
-	return err
-}
-
-// getOrCreateMegaFolder gets or creates a folder in MEGA
-func (bs *BackupSystem) getOrCreateMegaFolder(folderPath string) (*mega.Node, error) {
-	if folderPath == "" || folderPath == "/" {
-		return bs.mega.FS.GetRoot(), nil
-	}
-
-	// Try to find existing folder
-	nodes, err := bs.mega.FS.PathLookup(bs.mega.FS.GetRoot(), []string{folderPath})
-	if err == nil && len(nodes) > 0 {
-		return nodes[len(nodes)-1], nil
-	}
-
-	// Create the folder if it doesn't exist
-	bs.logger.Printf("Creating MEGA folder: %s\n", folderPath)
-	return bs.mega.CreateDir(folderPath, bs.mega.FS.GetRoot())
 }
